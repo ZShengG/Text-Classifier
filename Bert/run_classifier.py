@@ -203,6 +203,16 @@ class DataProcessor(object):
         lines.append(line)
       return lines
 
+  @classmethod
+  def _read_db(cls, sqllite_path, sql_statement):
+    """Reads a sqllite file.(*.db)"""
+    import sqlite3
+    with sqlite3.connect(sqllite_path) as conn:
+        c = conn.cursor()
+        c.execute(sql_statement)
+        lines = c.fetchall()
+        return lines
+
 
 class XnliProcessor(DataProcessor):
   """Processor for the XNLI data set."""
@@ -369,6 +379,50 @@ class ColaProcessor(DataProcessor):
       else:
         text_a = tokenization.convert_to_unicode(line[3])
         label = tokenization.convert_to_unicode(line[1])
+      examples.append(
+          InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+    return examples
+
+
+class BidProcessor(DataProcessor):
+  """Processor for the 课题二：招中标数据进行匹配 data set (GLUE version)."""
+
+  def get_train_examples(self, data_dir):
+    """See base class.训练集"""
+    return self._create_examples(
+        self._read_db(data_dir, "select * from _trade_origin_bid_old_20211210_"), "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class.验证集"""
+    return self._create_examples(
+        self._read_db(data_dir, "select * from _trade_origin_bid_old_20211210_"), "dev")
+
+  def get_test_examples(self, data_dir):
+    """See base class.测试集"""
+    return self._create_examples(
+        self._read_db(data_dir, "select * from _trade_origin_bid_old_20211210_"), "test")
+
+  def get_labels(self):
+    """See base class.
+        0：前期
+        1：后期
+    """
+    return ["0", "1"]
+
+  def _create_examples(self, lines, set_type):
+    """Creates examples for the training, dev and test sets."""
+    examples = []
+    for (i, line) in enumerate(lines):
+      # 排除【测试集有标注的行 & 训练/验证集无标注的行】
+      if (set_type == "test" and  line[6] is not None) or (set_type != "test" and  line[6] is None):
+        continue
+      guid = "%s-%s" % (set_type, i)
+      if set_type == "test":
+        text_a = tokenization.convert_to_unicode(line[1])
+        label = "0"
+      else:
+        text_a = tokenization.convert_to_unicode(line[1])
+        label = tokenization.convert_to_unicode(line[6])
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
@@ -788,6 +842,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "bid": BidProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
@@ -979,3 +1034,32 @@ if __name__ == "__main__":
   flags.mark_flag_as_required("bert_config_file")
   flags.mark_flag_as_required("output_dir")
   tf.app.run()
+
+
+
+'''
+python run_classifier.py 
+    # 是否训练/验证/预测
+    --do_train=true
+    --do_eval=true
+    --do_predict=true
+    # fine-tune参数，根据需求或显存大小调整
+    --max_seq_length=256
+    --train_batch_size=16
+    --learning_rate=2e-5
+    --num_train_epochs=3.0
+    # 任务名，决定采用哪个DataProcessor
+    --task_name=bid
+    # 数据路径，根据DataProcessor选择定位到文件夹或sqllite文件
+    --data_dir=../data/origin.db
+    # 词表
+    --vocab_file=./model/chinese_L-12_H-768_A-12/vocab.txt
+    # 网络参数
+    --bert_config_file=./model/chinese_L-12_H-768_A-12/bert_config.json
+    # 预训练模型
+    --init_checkpoint=./model/chinese_L-12_H-768_A-12/bert_model.ckpt
+    # 输出路径
+    --output_dir=../output/bertTmp/bid_output/
+
+python run_classifier.py --do_train=true --do_eval=true --do_predict=true --max_seq_length=256 --train_batch_size=4 --learning_rate=2e-5 --num_train_epochs=1.0 --task_name=bid --data_dir=../data/origin.db --vocab_file=./model/chinese_L-12_H-768_A-12/vocab.txt --bert_config_file=./model/chinese_L-12_H-768_A-12/bert_config.json --init_checkpoint=./model/chinese_L-12_H-768_A-12/bert_model.ckpt --output_dir=../output/bertTmp/bid_output/
+'''
